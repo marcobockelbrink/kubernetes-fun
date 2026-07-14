@@ -1,11 +1,22 @@
 # DB-Wifi Check
 
-Kleine Kubernetes-App, die alle 30 Sekunden die Verbindung zum DNS-Server
-**8.8.8.8** prüft, die Latenz misst und das Ganze als **ASCII-Grafik**
-darstellt — im Log (`kubectl logs`) und über ein Web-Interface auf
-**Port 8080**.
+Kleine Kubernetes-App, die im festen Intervall die Verbindung zum DNS-Server
+**8.8.8.8** prüft, die Latenz misst und das Ganze darstellt — als **ASCII-Grafik**
+im Log (`kubectl logs`) und als **modernes Web-Dashboard** auf **Port 8080**.
 
-![DB-Wifi Check – ASCII-Dashboard im Web-Interface](docs/screenshot.png)
+![DB-Wifi Check – Web-Dashboard mit Countdown, Verlaufsdiagramm und Export](docs/screenshot.png)
+
+## Neu in v0.2
+
+- **Schickeres Web-Dashboard** — Karten-Layout, farbcodiertes SVG-Verlaufsdiagramm,
+  Status-Ampel, DB-Rot-Akzent (statt reinem `<pre>`-ASCII-Block).
+- **Live-Countdown** bis zur nächsten automatischen Messung (Ring-Anzeige).
+- **Knopf „Jetzt messen"** — löst sofort eine echte Messung aus (`/probe`),
+  ohne auf das Intervall zu warten.
+- **PDF-Export** direkt aus dem Browser (Druckansicht, ganz ohne Zusatz-Tools).
+- **JSON-Endpunkt `/data`** für das Frontend und eigene Skripte.
+
+Weiterhin: nur Python-Standardbibliothek, kein eigenes Image, restricted-konform.
 
 ## Warum kein ICMP-Ping?
 
@@ -27,7 +38,7 @@ wird als **ConfigMap** eingehängt. Kein Build, keine Registry.
 
 ```
 db-wifi-check/
-├── app/check.py      # TCP-Check + ASCII-Dashboard + HTTP-Server (nur stdlib)
+├── app/check.py      # TCP-Check + Web-Dashboard + ASCII-Log + HTTP-Server (nur stdlib)
 ├── k8s.yaml          # Deployment (1 Replica, restricted-konform) + Service :8080
 ├── deploy.sh         # ConfigMap + Apply + Rollout + Port-Forward
 ├── Dockerfile        # optional: nur falls du doch ein eigenes Image bauen willst
@@ -60,11 +71,13 @@ kubectl port-forward svc/db-wifi-check 8080:8080
 
 ## Endpunkte
 
-| Pfad       | Inhalt                                     |
-|------------|--------------------------------------------|
-| `/`        | HTML-Seite, ASCII-Grafik, Auto-Refresh 30s |
-| `/raw`     | reiner Text (`curl localhost:8080/raw`)    |
-| `/healthz` | Liveness-/Readiness-Probe                  |
+| Pfad       | Inhalt                                                        |
+|------------|--------------------------------------------------------------|
+| `/`        | Web-Dashboard (JS holt `/data`, Countdown, Refresh, PDF)     |
+| `/data`    | JSON mit Messwerten, Kennzahlen und Countdown                |
+| `/probe`   | löst sofort eine Messung aus, liefert das frische JSON (auch `POST`) |
+| `/raw`     | reiner ASCII-Text (`curl localhost:8080/raw`)                |
+| `/healthz` | Liveness-/Readiness-Probe                                    |
 
 ## Konfiguration (Env-Variablen im Deployment)
 
@@ -90,3 +103,16 @@ kubectl logs -f deploy/db-wifi-check
 kubectl delete -f k8s.yaml
 kubectl delete configmap db-wifi-check-src
 ```
+
+## Changelog
+
+### v0.2
+- Schickeres Web-Dashboard (Karten, SVG-Verlaufsdiagramm, Status-Ampel, DB-Rot).
+- Live-Countdown bis zur nächsten Messung.
+- Knopf für sofortige, händische Messung (`/probe`).
+- PDF-Export aus dem Browser (Druckansicht).
+- JSON-Endpunkt `/data`; Auto-Refresh nun per JS statt `<meta refresh>`.
+
+### v0.1
+- TCP-Latenz-Check als ASCII-Dashboard im Log und Web-Interface (Port 8080),
+  restricted-PodSecurity-konform, ohne eigenes Image (Code via ConfigMap).
