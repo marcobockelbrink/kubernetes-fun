@@ -46,6 +46,7 @@ db-wifi-check/
 ├── k8s.yaml          # PVC + Deployment (restricted-konform) + Service :8080
 ├── deploy.sh         # ConfigMap + Apply + Rollout + Port-Forward
 ├── Dockerfile        # optional: nur falls du doch ein eigenes Image bauen willst
+├── storage/          # local-path-provisioner (Talos-tauglich) fuer die PVC
 └── README.md
 ```
 
@@ -57,12 +58,24 @@ erhalten. Dafür mountet `k8s.yaml` ein **PersistentVolumeClaim** (128 Mi) nach
 `/data`; `fsGroup: 10001` sorgt dafür, dass der Nicht-Root-User hineinschreiben
 darf.
 
-> **Ohne Default-StorageClass** (z. B. blankes Talos) bleibt die PVC `Pending`
-> und der Pod startet nicht. Dann entweder eine StorageClass installieren
-> (z. B. `local-path-provisioner`) **oder** in `k8s.yaml` das Volume `data` von
-> `persistentVolumeClaim` auf `emptyDir: {}` umstellen. Läuft dann ohne
-> Persistenz über Pod-Neustarts hinweg — die App erkennt das selbst und zeigt
-> „Verlauf: nur im Speicher".
+> **Ohne Default-StorageClass** (z. B. blankes Talos wie `docker-lab`) bleibt die
+> PVC `Pending` und der Pod startet nicht (`FailedScheduling: unbound immediate
+> PersistentVolumeClaims`). Zwei Auswege:
+>
+> **a) StorageClass installieren (empfohlen, echte Persistenz).** Das mitgelieferte,
+> Talos-taugliche `local-path-provisioner`-Manifest anwenden und als Default markieren:
+>
+> ```bash
+> kubectl apply -f storage/local-path-provisioner.talos.yaml
+> kubectl patch storageclass local-path \
+>   -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+> # danach den haengenden Pod neu anstossen, damit die PVC bindet:
+> kubectl delete pod -l app=db-wifi-check
+> ```
+>
+> **b) `emptyDir`-Fallback.** In `k8s.yaml` das Volume `data` von
+> `persistentVolumeClaim` auf `emptyDir: {}` umstellen. Läuft ohne Persistenz über
+> Pod-Neustarts hinweg — die App erkennt das selbst und zeigt „Verlauf: nur im Speicher".
 
 Verlauf löschen: im Dashboard der Knopf **„Verlauf löschen"** (je Ziel), per
 API `curl -X POST 'localhost:8080/clear?target=8.8.8.8:53'` (ohne `target`
