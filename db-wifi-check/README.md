@@ -1,20 +1,24 @@
 # DB-Wifi Check
 
-Kleine Kubernetes-App, die im festen Intervall die Verbindung zum DNS-Server
-**8.8.8.8** prüft, die Latenz misst und das Ganze darstellt — als **ASCII-Grafik**
-im Log (`kubectl logs`) und als **modernes Web-Dashboard** auf **Port 8080**.
+Kleine Kubernetes-App, die im festen Intervall die Verbindung zu einem oder
+**mehreren DNS-Servern** prüft, die Latenz misst und das Ganze darstellt — als
+**ASCII-Grafik** im Log (`kubectl logs`) und als **modernes Web-Dashboard** auf
+**Port 8080**.
 
-![DB-Wifi Check – Web-Dashboard mit Countdown, Verlaufsdiagramm und Export](docs/screenshot.png)
+![DB-Wifi Check – Web-Dashboard mit Ziel-Tabs, Countdown, Verlaufsdiagramm und Export](docs/screenshot.png)
 
-## Neu in v0.2
+## Neu in v0.3
 
-- **Schickeres Web-Dashboard** — Karten-Layout, farbcodiertes SVG-Verlaufsdiagramm,
-  Status-Ampel, DB-Rot-Akzent (statt reinem `<pre>`-ASCII-Block).
-- **Live-Countdown** bis zur nächsten automatischen Messung (Ring-Anzeige).
-- **Knopf „Jetzt messen"** — löst sofort eine echte Messung aus (`/probe`),
-  ohne auf das Intervall zu warten.
-- **PDF-Export** direkt aus dem Browser (Druckansicht, ganz ohne Zusatz-Tools).
-- **JSON-Endpunkt `/data`** für das Frontend und eigene Skripte.
+- **Mehrere Ziele gleichzeitig** — per `TARGETS` (Komma-separiert, je `host:port`).
+  Im Dashboard als **Tabs** mit eigener Status-Ampel je Ziel.
+- **Persistenter Verlauf** — die Messwerte werden auf ein Volume (`DATA_DIR`)
+  geschrieben und beim Start wieder geladen, überleben also Pod-Neustarts.
+  Ist das Verzeichnis nicht beschreibbar, schaltet die App automatisch auf
+  „nur im Speicher" (Anzeige oben rechts im Dashboard).
+- **Knopf „Verlauf löschen"** je Ziel (`/clear`).
+
+Aus v0.2: modernes Dashboard, Live-Countdown, Knopf „Jetzt messen" (`/probe`),
+PDF-Export (Druckansicht), JSON-Endpunkt `/data`.
 
 Weiterhin: nur Python-Standardbibliothek, kein eigenes Image, restricted-konform.
 
@@ -39,11 +43,30 @@ wird als **ConfigMap** eingehängt. Kein Build, keine Registry.
 ```
 db-wifi-check/
 ├── app/check.py      # TCP-Check + Web-Dashboard + ASCII-Log + HTTP-Server (nur stdlib)
-├── k8s.yaml          # Deployment (1 Replica, restricted-konform) + Service :8080
+├── k8s.yaml          # PVC + Deployment (restricted-konform) + Service :8080
 ├── deploy.sh         # ConfigMap + Apply + Rollout + Port-Forward
 ├── Dockerfile        # optional: nur falls du doch ein eigenes Image bauen willst
 └── README.md
 ```
+
+## Persistenter Verlauf
+
+Die App legt den Verlauf als `history.json` unter `DATA_DIR` (Default `/data`)
+ab und lädt ihn beim Start wieder — so bleiben die Messwerte über Pod-Neustarts
+erhalten. Dafür mountet `k8s.yaml` ein **PersistentVolumeClaim** (128 Mi) nach
+`/data`; `fsGroup: 10001` sorgt dafür, dass der Nicht-Root-User hineinschreiben
+darf.
+
+> **Ohne Default-StorageClass** (z. B. blankes Talos) bleibt die PVC `Pending`
+> und der Pod startet nicht. Dann entweder eine StorageClass installieren
+> (z. B. `local-path-provisioner`) **oder** in `k8s.yaml` das Volume `data` von
+> `persistentVolumeClaim` auf `emptyDir: {}` umstellen. Läuft dann ohne
+> Persistenz über Pod-Neustarts hinweg — die App erkennt das selbst und zeigt
+> „Verlauf: nur im Speicher".
+
+Verlauf löschen: im Dashboard der Knopf **„Verlauf löschen"** (je Ziel), per
+API `curl -X POST 'localhost:8080/clear?target=8.8.8.8:53'` (ohne `target`
+werden alle Ziele geleert).
 
 ## Deployen
 
@@ -73,23 +96,26 @@ kubectl port-forward svc/db-wifi-check 8080:8080
 
 | Pfad       | Inhalt                                                        |
 |------------|--------------------------------------------------------------|
-| `/`        | Web-Dashboard (JS holt `/data`, Countdown, Refresh, PDF)     |
-| `/data`    | JSON mit Messwerten, Kennzahlen und Countdown                |
-| `/probe`   | löst sofort eine Messung aus, liefert das frische JSON (auch `POST`) |
+| `/`        | Web-Dashboard (Tabs, Countdown, Refresh, PDF, Löschen)       |
+| `/data`    | JSON mit allen Zielen, Kennzahlen und Countdown              |
+| `/probe`   | misst sofort alle Ziele, liefert das frische JSON (auch `POST`) |
+| `/clear`   | leert den Verlauf (`?target=host:port` für ein Ziel, sonst alle) |
 | `/raw`     | reiner ASCII-Text (`curl localhost:8080/raw`)                |
 | `/healthz` | Liveness-/Readiness-Probe                                    |
 
 ## Konfiguration (Env-Variablen im Deployment)
 
-| Variable           | Default   | Bedeutung                       |
-|--------------------|-----------|---------------------------------|
-| `TARGET`           | `8.8.8.8` | Ziel-Host                       |
-| `PROBE_PORT`       | `53`      | geprüfter TCP-Port (DNS)        |
-| `INTERVAL_SECONDS` | `30`      | Prüf-Intervall                  |
-| `TIMEOUT_SECONDS`  | `2`       | Connect-Timeout                 |
-| `HISTORY`          | `20`      | Anzahl gespeicherter Messungen  |
-| `MAX_MS`           | `100`     | ms = volle Balkenbreite         |
-| `PORT`             | `8080`    | HTTP-Port                       |
+| Variable           | Default             | Bedeutung                                   |
+|--------------------|---------------------|---------------------------------------------|
+| `TARGETS`          | `8.8.8.8:53,1.1.1.1:53` | Ziele, Komma-separiert (`host:port`, Port optional) |
+| `TARGET`           | `8.8.8.8`           | Einzel-Ziel (Fallback, falls `TARGETS` leer)|
+| `PROBE_PORT`       | `53`                | Default-TCP-Port, wenn im Ziel keiner steht |
+| `INTERVAL_SECONDS` | `30`                | Prüf-Intervall                              |
+| `TIMEOUT_SECONDS`  | `2`                 | Connect-Timeout                             |
+| `HISTORY`          | `20`                | gespeicherte Messungen je Ziel              |
+| `DATA_DIR`         | `/data`             | Ablage für den persistenten Verlauf         |
+| `MAX_MS`           | `100`               | ms = volle Balkenbreite                     |
+| `PORT`             | `8080`              | HTTP-Port                                   |
 
 ## Code ändern
 
@@ -105,6 +131,13 @@ kubectl delete configmap db-wifi-check-src
 ```
 
 ## Changelog
+
+### v0.3
+- Mehrere Ziele gleichzeitig (`TARGETS`), im Dashboard als Tabs.
+- Persistenter Verlauf auf ein Volume (`DATA_DIR`), lädt beim Start; Fallback
+  auf „nur im Speicher", wenn nicht beschreibbar.
+- Knopf „Verlauf löschen" je Ziel (`/clear`).
+- `k8s.yaml`: PVC + `/data`-Mount, `fsGroup`, `Recreate`-Strategie.
 
 ### v0.2
 - Schickeres Web-Dashboard (Karten, SVG-Verlaufsdiagramm, Status-Ampel, DB-Rot).

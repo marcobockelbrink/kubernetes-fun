@@ -1,3 +1,22 @@
+# Persistenter Verlauf braucht ein beschreibbares Volume. Diese PVC nutzt die
+# Default-StorageClass des Clusters. Hat der Cluster KEINE (z. B. blankes Talos),
+# bleibt die PVC "Pending" und der Pod startet nicht -> dann entweder eine
+# StorageClass installieren (z. B. local-path-provisioner) ODER unten das
+# Volume "data" von persistentVolumeClaim auf  emptyDir: {}  umstellen
+# (laeuft dann ohne Persistenz ueber Pod-Neustarts hinweg; die App merkt das
+# selbst und schaltet automatisch auf "nur im Speicher").
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-wifi-check-data
+  labels:
+    app: db-wifi-check
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 128Mi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +25,9 @@ metadata:
     app: db-wifi-check
 spec:
   replicas: 1
+  # Persistenz-Volume (RWO) vertraegt kein paralleles Alt+Neu -> sauberer Tausch
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: db-wifi-check
@@ -19,6 +41,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        # fsGroup sorgt dafuer, dass das gemountete Volume der Gruppe gehoert
+        # und der Nicht-Root-User hineinschreiben darf.
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -30,10 +55,14 @@ spec:
             - containerPort: 8080
               name: http
           env:
-            - name: TARGET
-              value: "8.8.8.8"
+            # Mehrere Ziele: Komma-separiert, je "host:port" (Port optional -> 53)
+            - name: TARGETS
+              value: "8.8.8.8:53,1.1.1.1:53"
             - name: INTERVAL_SECONDS
               value: "30"
+            # Ablage fuer den persistenten Verlauf (siehe Volume unten)
+            - name: DATA_DIR
+              value: "/data"
             - name: PYTHONUNBUFFERED
               value: "1"
           # restricted-PodSecurity-konform (Container-Ebene)
@@ -46,6 +75,8 @@ spec:
             - name: src
               mountPath: /app
               readOnly: true
+            - name: data
+              mountPath: /data
           readinessProbe:
             httpGet:
               path: /healthz
@@ -69,6 +100,11 @@ spec:
         - name: src
           configMap:
             name: db-wifi-check-src   # wird von deploy.sh aus app/check.py erzeugt
+        - name: data
+          persistentVolumeClaim:
+            claimName: db-wifi-check-data
+          # --- Ohne StorageClass? Dann obige zwei Zeilen ersetzen durch: ---
+          # emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
