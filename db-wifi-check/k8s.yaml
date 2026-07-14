@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-wifi-check
+  labels:
+    app: db-wifi-check
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-wifi-check
+  template:
+    metadata:
+      labels:
+        app: db-wifi-check
+    spec:
+      # restricted-PodSecurity-konform (Pod-Ebene)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: db-wifi-check
+          # Oeffentliches Image -> Cluster zieht es selbst, kein eigenes Build/Registry noetig
+          image: python:3.12-slim
+          command: ["python", "/app/check.py"]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: TARGET
+              value: "8.8.8.8"
+            - name: INTERVAL_SECONDS
+              value: "30"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          # restricted-PodSecurity-konform (Container-Ebene)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: src
+              mountPath: /app
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+      volumes:
+        - name: src
+          configMap:
+            name: db-wifi-check-src   # wird von deploy.sh aus app/check.py erzeugt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-wifi-check
+  labels:
+    app: db-wifi-check
+spec:
+  selector:
+    app: db-wifi-check
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
