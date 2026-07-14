@@ -5,6 +5,8 @@ Kleine Kubernetes-App, die alle 30 Sekunden die Verbindung zum DNS-Server
 darstellt — im Log (`kubectl logs`) und über ein Web-Interface auf
 **Port 8080**.
 
+![DB-Wifi Check – ASCII-Dashboard im Web-Interface](docs/screenshot.png)
+
 ## Warum kein ICMP-Ping?
 
 Der Cluster (`docker-lab`, Talos) erzwingt die **restricted**-PodSecurity-Policy.
