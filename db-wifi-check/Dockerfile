@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913
 
 # Reine Standardbibliothek, keine System-Pakete noetig
 # (die App misst per TCP-Connect zum DNS-Port, nicht per ICMP-Ping).
